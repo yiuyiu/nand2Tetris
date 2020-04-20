@@ -40,4 +40,36 @@ CHIP CPU {
 
     PARTS:
     // Put your code here:
+    Mux16(a=instruction, b=aluout, sel=instruction[15], out=ainput);
+    Not(in=instruction[15], out=isains);
+    Or(a=isains, b=instruction[5], out=isloada);
+    // A Register
+    Register(in=ainput, load=isloada, out=aoutput,out[0..14]=addressM);
+    // A or M 
+    And(a=instruction[12], b=instruction[15], out=shouldUseInM);
+    Mux16(a=aoutput, b=inM, sel=shouldUseInM, out=aluinput1);
+    // D Register
+    And(a=instruction[15], b=instruction[4], out=shouldWriteD);
+    Register(in=aluout, load=shouldWriteD, out=doutput);
+    And(a=instruction[15], b=instruction[11], out=zxinput);
+    And(a=instruction[15], b=instruction[10], out=nxinput);
+    And(a=instruction[15], b=instruction[9], out=zyinput);
+    And(a=instruction[15], b=instruction[8], out=nyinput);
+    And(a=instruction[15], b=instruction[7], out=finput);
+    And(a=instruction[15], b=instruction[6], out=noinput);
+    ALU(x=doutput, y=aluinput1, zx=zxinput, nx=nxinput, zy=zyinput, ny=nyinput, f=finput, no=noinput, out=aluout,out=outM, zr=iszero, ng=isneg);
+    And(a=instruction[15], b=instruction[3], out=writeM);
+
+    // jump
+    Xor(a=iszero, b=isneg, out=xor1);
+    Not(in=xor1, out=isPos);
+    And(a=instruction[0], b=isPos, out=isjump1);
+    And(a=instruction[1], b=iszero, out=isjump2);
+    And(a=instruction[2], b=isneg, out=isjump3);
+    Or(a=isjump1, b=isjump2, out=jump12);
+    Or(a=jump12, b=isjump3, out=shouldjump1);
+    And(a=shouldjump1, b=instruction[15], out=shouldjump);
+    Mux16(a=outpc, b=aoutput, sel=shouldjump, out=inputpc);
+    Not(in=shouldjump, out=shouldinc);
+    PC(in=inputpc, load=shouldjump, inc=shouldinc, reset=reset, out[0..14]=pc,out=outpc);
 }
