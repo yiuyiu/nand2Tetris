@@ -17,9 +17,8 @@ class JackAnalyzer {
         } else {
             files.push(process.argv[2])
         }
-        files.forEach(item=>{
-            const ce = new CompilationEngine(item);
-            ce.print();
+        files.forEach(item => {
+            new CompilationEngine(item);
         })
         // const ce = new CompilationEngine(arg2);
         // ce.print();

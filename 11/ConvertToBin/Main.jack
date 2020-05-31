@@ -39,6 +39,7 @@ class Main {
     	var boolean loop;
     	
     	let loop = true;
+        // main0
     	while (loop) {
     	    let position = position + 1;
     	    let mask = Main.nextMask(mask);
@@ -49,13 +50,19 @@ class Main {
     	            do Memory.poke(8000 + position, 1);
        	        }
     	        else {
+                    // main4
     	            do Memory.poke(8000 + position, 0);
+                    // main5
       	        }    
+                
     	    }
     	    else {
+                // main2
     	        let loop = false;
     	    }
+            // main3
     	}
+        // main1
     	return;
     }
  

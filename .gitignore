@@ -14,3 +14,4 @@ node_modules
 11/**/*.xml
 11/**/*.js
 11/**/*.js.map
+11/**/*.vm

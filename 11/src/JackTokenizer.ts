@@ -116,7 +116,7 @@ export class JackTokenizer {
         if (symbolTokens.indexOf(token) > -1) {
             return 'SYMBOL';
         }
-        if (/\d+/.test(token)) {
+        if (/^\d+/.test(token)) {
             return 'INT-CONST';
         }
         if (/".*"/.test(token)) {

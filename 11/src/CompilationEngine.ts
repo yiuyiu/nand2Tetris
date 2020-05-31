@@ -10,15 +10,17 @@ const mapVarNameKindToCommand = {
     'ARG': 'ARG'
 }
 const mapOp2ArithmeticCommand: {
-    [key in opCommand]?: arithmeticCommand
+    [key in opCommand]?: arithmeticCommand | 'NONE'
 } = {
     "+": 'ADD',
     '-': 'SUB',
     '|': 'OR',
-    '&amp;': 'ADD',
+    '&amp;': 'AND',
     '&lt;': 'LT',
     '&gt;': 'GT',
-    '=': 'EQ'
+    '=': 'EQ',
+    "*": 'NONE',
+    '/': 'NONE'
 }
 export class CompilationEngine {
     tokenIns: JackTokenizer;
@@ -118,8 +120,8 @@ export class CompilationEngine {
         if (functionKind == 'constructor') {
             // 分配空间
             const fieldNum = this.symbolTable.VarCount('FIELD');
-            this.vmWriter.writePush({ segment: 'CONST', index: 0 })
-            this.vmWriter.writeCall('Memory.alloc', fieldNum);
+            this.vmWriter.writePush({ segment: 'CONST', index: fieldNum })
+            this.vmWriter.writeCall('Memory.alloc', 1);
             this.vmWriter.writePop({ segment: 'POINTER', index: 0 })
         }
         if (functionKind == 'method') {
@@ -247,7 +249,7 @@ export class CompilationEngine {
             // 数组
             ins.advance();
             isArray = true;
-            this.vmWriter.writePush({ segment: mapVarNameKindToCommand[varName], index })
+            this.vmWriter.writePush({ segment: mapVarNameKindToCommand[this.symbolTable.KindOf(varName)], index })
             this.compileExpression();
             this.vmWriter.writeArithmetic('ADD');
             // ]
@@ -267,7 +269,7 @@ export class CompilationEngine {
             this.vmWriter.writePush({ segment: 'TEMP', index: 0 })
             this.vmWriter.writePop({ segment: 'THAT', index: 0 })
         } else {
-            this.vmWriter.writePop({ segment: mapVarNameKindToCommand[varName], index })
+            this.vmWriter.writePop({ segment: mapVarNameKindToCommand[this.symbolTable.KindOf(varName)], index })
         }
         // ;
         ins.advance();
@@ -339,9 +341,10 @@ export class CompilationEngine {
         const ops = Object.keys(mapOp2ArithmeticCommand)
         if (ops.indexOf(ins.symbolNoMark()) > -1) {
             // op
+            const currentOp = ins.symbolNoMark();
             ins.advance();
             this.compileTerm();
-            switch (ins.symbolNoMark()) {
+            switch (currentOp) {
                 case '*':
                     this.vmWriter.writeCall('Math.multiply', 2)
                     break;
@@ -349,7 +352,7 @@ export class CompilationEngine {
                     this.vmWriter.writeCall('Math.divide', 2)
                     break;
                 default:
-                    this.vmWriter.writeArithmetic(mapOp2ArithmeticCommand[ins.symbolNoMark()])
+                    this.vmWriter.writeArithmetic(mapOp2ArithmeticCommand[currentOp])
             }
         }
     }
@@ -381,9 +384,10 @@ export class CompilationEngine {
         }
         // stringConstant
         if (ins.stringVal()) {
-            const str: string = ins.stringValNoMark();
+            // 去掉双引号，原先是""Score: 0"" 这种形式
+            const str: string = ins.stringValNoMark().replace(/"/g, '');
             this.vmWriter.writePush({ segment: 'CONST', index: str.length })
-            this.vmWriter.writeFunction('String.new', 1)
+            this.vmWriter.writeCall('String.new', 1)
             for (let i of str) {
                 this.vmWriter.writePush({ segment: 'CONST', index: i.charCodeAt(0) })
                 this.vmWriter.writeCall('String.appendChar', 2)
@@ -400,13 +404,14 @@ export class CompilationEngine {
         }
         // unaryOp
         if (['-', '~'].indexOf(ins.symbolNoMark()) > -1) {
+            const unaryOp = ins.symbolNoMark();
             ins.advance();
             this.compileTerm();
             const map = {
                 '-': 'NEG',
                 '~': 'NOT'
             }
-            this.vmWriter.writeArithmetic(map[ins.symbolNoMark()])
+            this.vmWriter.writeArithmetic(map[unaryOp])
         } else {
             ins.advance();
         }
