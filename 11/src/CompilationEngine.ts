@@ -1,207 +1,178 @@
-import * as fs from 'fs';
+import * as path from 'path';
 import { JackTokenizer } from './JackTokenizer';
 import { SymbolTable } from './SymbolTable';
+import { VMWriter } from './VMWriter';
 const op = ['+', '-', '*', '/', '|', '&amp;', '&lt;', '&gt;', '='];
+const mapVarNameKindToCommand = {
+    'STATIC': 'STATIC',
+    'VAR': 'LOCAL',
+    'FIELD': 'THIS',
+    'ARG': 'ARG'
+}
+const mapOp2ArithmeticCommand: {
+    [key in opCommand]?: arithmeticCommand
+} = {
+    "+": 'ADD',
+    '-': 'SUB',
+    '|': 'OR',
+    '&amp;': 'ADD',
+    '&lt;': 'LT',
+    '&gt;': 'GT',
+    '=': 'EQ'
+}
 export class CompilationEngine {
     tokenIns: JackTokenizer;
-    output: string;
     indent: number;
     filename: string;
+    className: string;
     symbolTable: SymbolTable
+    vmWriter: VMWriter
+    labelIndex: number
+    subroutineObj: {
+        [name: string]: {
+            isVoid: boolean,
+            isMethod: boolean,
+            argNum: number
+        }
+    }
     constructor(filename: string) {
         this.filename = filename;
+        this.className = path.basename(filename).replace('.jack', '');
         this.tokenIns = new JackTokenizer(filename);
-        this.output = ``;
-        this.indent = 1;
+        this.subroutineObj = {};
         this.symbolTable = new SymbolTable();
+        this.vmWriter = new VMWriter(filename.replace('.jack', '.vm'));
+        this.labelIndex = 0
         this.compileClass();
-    }
-    print() {
-        fs.writeFileSync(this.filename.replace('.jack', 'Tree.xml'), this.output);
     }
     compileClass() {
         const tokenIns = this.tokenIns;
-        this.output += '<class>';
-        tokenIns.advance();
-        this.output += `${this.space()}${tokenIns.keyword()}`;
-        tokenIns.advance();
-        this.output += `${this.space()}${tokenIns.identifierWithType('class')}`;
-        tokenIns.advance();
-        this.output += `${this.space()}${tokenIns.symbol()}`;
-        tokenIns.advance();
+        tokenIns.advance(); // class
+        tokenIns.advance(); // className
+        tokenIns.advance(); // {
+        tokenIns.advance(); // static field constructor function method
         while (['static', 'field'].indexOf(tokenIns.keywordNoMark()) > -1) {
             this.compileClassVarDec();
         }
         while (['constructor', 'function', 'method'].indexOf(tokenIns.keywordNoMark()) > -1) {
             this.compileSubroutine();
         }
-        this.output += `${this.space()}${tokenIns.symbol()}`;
-        this.output += '\n</class>';
+        // }
+        this.vmWriter.close()
     }
     // 静态生命或字段声明
     compileClassVarDec() {
         const ins = this.tokenIns;
-        this.output += `${this.space()}<classVarDec>`;
-        this.indent++;
         // static field
-        this.output += `${this.space()}${ins.keyword()}`;
         let kind = ins.keywordNoMark() as 'static' | 'field';
         // type
         ins.advance();
-        let type;
-        if (ins.keyword()) {
-            this.output += `${this.space()}${ins.keyword()}`;
-            type = ins.keywordNoMark();
-        }
-        if (ins.identifier()) {
-            this.output += `${this.space()}${ins.identifierWithType('class')}`;
-            type = ins.identifierNoMark();
-        }
+        const type = this.compileType()
         // varName
         ins.advance();
         // :TODO
         const kindUpper = kind.toUpperCase() as 'STATIC' | 'FIELD';
         this.symbolTable.Define(ins.identifierNoMark(), type, kindUpper);
-        this.output += `${this.space()}${ins.identifierWithType(kind, this.symbolTable.IndexOf(ins.identifierNoMark()))}`;
         ins.advance();
         while (ins.symbolNoMark() != ';') {
             // ,
-            this.output += `${this.space()}${ins.symbol()}`;
-            // varName
-            ins.advance();
-            // this.output += `${this.space()}${ins.identifier()}`;
+            ins.advance() // varName;
             this.symbolTable.Define(ins.identifierNoMark(), type, kindUpper);
-            this.output += `${this.space()}${ins.identifierWithType(kind, this.symbolTable.IndexOf(ins.identifierNoMark()))}`;
             ins.advance();
         }
-        this.output += `${this.space()}${ins.symbol()}`;
-        this.indent--;
-        this.output += `${this.space()}</classVarDec>`;
         ins.advance();
     }
     compileType() {
         const tokenIns = this.tokenIns;
         if (tokenIns.keyword()) {
-            this.output += `${this.space()}${tokenIns.keyword()}`;
             return tokenIns.keywordNoMark();
         } else {
-            this.output += `${this.space()}${tokenIns.identifierWithType('class')}`;
             return tokenIns.identifierNoMark();
-            // this.output += `${this.space()}${tokenIns.identifier()}`;
         }
     }
     // 整个方法、函数或者构造函数
     compileSubroutine() {
         this.symbolTable.startSubroutine();
-        this.output += `${this.space()}<subroutineDec>`;
         const tokenIns = this.tokenIns;
-        this.indent++;
-        this.output += `${this.space()}${tokenIns.keyword()}`;
-        tokenIns.advance();
-        this.compileType();
-        // functionName
-        tokenIns.advance();
-        // this.output += `${this.space()}${tokenIns.identifier()}`;
-        this.output += `${this.space()}${tokenIns.identifierWithType('subroutine')}`;
-        // (
-        tokenIns.advance();
-        this.output += `${this.space()}${tokenIns.symbol()}`;
-        // parameter or )
-        tokenIns.advance();
+        const functionKind = tokenIns.keywordNoMark() as functionKind;
+
+        tokenIns.advance(); // function type
+
+        tokenIns.advance(); // functionName
+        const functionName = tokenIns.identifierNoMark();
+        tokenIns.advance();// (
+        tokenIns.advance();// parameter or )
         if (tokenIns.symbolNoMark() != ')') {
             this.compileParameterList();
         } else {
-            this.output += `${this.space()}<parameterList>`;
-            this.output += `${this.space()}</parameterList>`;
-            this.output += `${this.space()}${tokenIns.symbol()}`;
             tokenIns.advance();
         }
-        // body
-        this.output += `${this.space()}<subroutineBody>`;
-        this.indent += 2;
-        this.output += `${this.space()}${tokenIns.symbol()}`;
+        // {
         tokenIns.advance();
         while (tokenIns.keywordNoMark() == 'var') {
             this.compileVarDec();
         }
-        // statments
+        // 几个local变量
+        const localNum = this.symbolTable.VarCount('VAR');
+        this.vmWriter.writeFunction(this.getFunctionFullName(functionName), localNum);
+        if (functionKind == 'constructor') {
+            // 分配空间
+            const fieldNum = this.symbolTable.VarCount('FIELD');
+            this.vmWriter.writePush({ segment: 'CONST', index: 0 })
+            this.vmWriter.writeCall('Memory.alloc', fieldNum);
+            this.vmWriter.writePop({ segment: 'POINTER', index: 0 })
+        }
+        if (functionKind == 'method') {
+            // push argument 0
+            // pop pointer 0
+            this.vmWriter.writePush({ segment: 'ARG', index: 0 })
+            this.vmWriter.writePop({ segment: 'POINTER', index: 0 })
+        }
+        // statements
         this.compileStatements();
-        this.indent -= 2;
-        this.output += `${this.space()}</subroutineBody>`;
-
-
-        this.indent--;
-        this.output += `${this.space()}</subroutineDec>`;
-        // tokenIns.advance();
-        this.symbolTable.print();
+    }
+    getFunctionFullName(subroutineName: string): string {
+        return this.className + '.' + subroutineName;
     }
     // 编译参数列表（可能为空），不包括括号“（）”
     compileParameterList() {
         const ins = this.tokenIns;
-        this.output += `${this.space()}<parameterList>`;
-        this.indent++;
-        // this.output += `${this.space()}${ins.keyword()}`;
-        // ins.advance();
         let isCurrentType = true;
         let type = '';
         while (ins.symbolNoMark() != ')') {
             if (isCurrentType) {
-                type = this.compileType();
                 isCurrentType = false;
             } else {
                 if (ins.symbol()) {
-                    this.output += `${this.space()}${ins.symbol()}`;
                     isCurrentType = true;
                 }
                 if (ins.identifier()) {
                     this.symbolTable.Define(ins.identifierNoMark(), type, 'ARG')
-                    this.output += `${this.space()}${ins.identifierWithType('arg', this.symbolTable.IndexOf(ins.identifierNoMark()))}`;
                 }
             }
-            // if (ins.keyword()) {
-            //     this.output += `${this.space()}${ins.keyword()}`;
-            // }
-            // if (ins.symbol()) {
-            //     this.output += `${this.space()}${ins.symbol()}`;
-            // }
-            // if (ins.identifier()) {
-            //     this.output += `${this.space()}${ins.identifier()}`;
-            // }
             ins.advance();
         }
-        this.indent--;
-        this.output += `${this.space()}</parameterList>`;
         // )
-        this.output += `${this.space()}${ins.symbol()}`;
         ins.advance();
     }
     // var声明
     compileVarDec() {
-        this.output += `${this.space()}<varDec>`;
-        this.indent++;
-        this.output += `${this.space()}${this.tokenIns.keyword()}`
-        this.tokenIns.advance();
+        // var 
+        this.tokenIns.advance(); // type
         const type = this.compileType();
-        this.tokenIns.advance();
+        this.tokenIns.advance(); // varName
         this.symbolTable.Define(this.tokenIns.identifierNoMark(), type, 'VAR');
-        this.output += `${this.space()}${this.tokenIns.identifierWithType('var', this.symbolTable.IndexOf(this.tokenIns.identifierNoMark()))}`;
         this.tokenIns.advance();
         while (this.tokenIns.symbolNoMark() != ';') {
-            this.output += `${this.space()}${this.tokenIns.symbol()}`;
-            this.tokenIns.advance();
+            // ,
+            this.tokenIns.advance(); // varName
             this.symbolTable.Define(this.tokenIns.identifierNoMark(), type, 'VAR');
-            this.output += `${this.space()}${this.tokenIns.identifierWithType('var', this.symbolTable.IndexOf(this.tokenIns.identifierNoMark()))}`;
             this.tokenIns.advance();
         }
-        this.output += `${this.space()}${this.tokenIns.symbol()}`;
-        this.indent--;
-        this.output += `${this.space()}</varDec>`;
         this.tokenIns.advance();
     }
     // 一系列语句，不包含大括号“（）”
     compileStatements() {
-        this.output += `${this.space()}<statements>`;
-        this.indent += 2;
         while (!(this.tokenIns.symbolNoMark() == '}')) {
             const nextKeyword = this.tokenIns.keywordNoMark();
             switch (nextKeyword) {
@@ -225,297 +196,292 @@ export class CompilationEngine {
                     this.tokenIns.advance();
             }
         }
-        this.indent -= 2;
-        this.output += `${this.space()}</statements>`;
         // }
-        this.output += `${this.space()}${this.tokenIns.symbol()}`;
         this.tokenIns.advance();
     }
     // do语句
     compileDo() {
-        this.output += `${this.space()}<doStatement>`;
-        this.indent += 2;
         const ins = this.tokenIns;
-        this.output += `${this.space()}${ins.keyword()}`;
         ins.advance();
         let identifierName = ins.identifierNoMark();
-        // this.output += `${this.space()}${ins.identifier()}`;
+        let subroutineName = identifierName;
         ins.advance();
+        let caller = '';
+        let isMethod = true
         if (ins.symbolNoMark() == '.') {
             if (this.symbolTable.KindOf(identifierName) == 'NONE') {
-                this.output += `${this.space()}<iden-class> ${identifierName} </iden-class>`
+                caller = identifierName
+                isMethod = false
             } else {
-                this.compileVarName(identifierName);
-                // this.output += `${this.space()}<iden-var-${this.symbolTable.IndexOf(identifierName)}> ${identifierName} </iden-var-${this.symbolTable.IndexOf(identifierName)}>`
+                caller = this.symbolTable.TypeOf(identifierName);
+                const segment = mapVarNameKindToCommand[this.symbolTable.KindOf(identifierName)];
+                this.vmWriter.writePush({ segment, index: this.symbolTable.IndexOf(identifierName) })
             }
-            this.output += `${this.space()}${ins.symbol()}`;
-            ins.advance();
-            this.output += `${this.space()}${ins.identifierWithType('subroutine')}`;
+            ins.advance(); // subroutineName
+            subroutineName = ins.identifierNoMark();
             ins.advance();
         } else {
-            this.output += `${this.space()}<iden-subroutine> ${identifierName} </iden-subroutine>`
+            caller = this.className;
+            this.vmWriter.writePush({ segment: 'POINTER', index: 0 })
         }
         // (
-        this.output += `${this.space()}${ins.symbol()}`;
         ins.advance();
-        this.compileExpressionList();
+        const paraNum = this.compileExpressionList();
+        this.vmWriter.writeCall(`${caller}.${subroutineName}`, isMethod ? paraNum + 1 : paraNum)
+        // void方法清除无用
+        this.vmWriter.writePop({ segment: 'TEMP', index: 0 })
         // ;
-        this.writeSymbol();
         ins.advance();
-        this.indent -= 2;
-        this.output += `${this.space()}</doStatement>`;
-    }
-    compileVarName(identifierName) {
-        const kind = this.symbolTable.KindOf(identifierName);
-        const lowerCaseKind = kind.toLowerCase();
-        this.output += `${this.space()}<iden-${lowerCaseKind}-${this.symbolTable.IndexOf(identifierName)}> ${identifierName} </iden-${lowerCaseKind}-${this.symbolTable.IndexOf(identifierName)}>`
     }
     // let语句
     compileLet() {
-        this.output += `${this.space()}<letStatement>`;
-        this.indent += 2;
         const ins = this.tokenIns;
         // let
-        this.output += `${this.space()}${ins.keyword()}`;
-        // varName
-        ins.advance();
-
-        this.compileVarName(ins.identifierNoMark());
-
+        ins.advance(); // varName
+        let isArray = false;
+        const varName = ins.identifierNoMark();
+        const varNameKind = this.symbolTable.KindOf(varName)
+        const index = this.symbolTable.IndexOf(varName)
         ins.advance();
         if (ins.symbolNoMark() == '[') {
-            this.output += `${this.space()}${ins.symbol()}`;
+            // 数组
             ins.advance();
+            isArray = true;
+            this.vmWriter.writePush({ segment: mapVarNameKindToCommand[varName], index })
             this.compileExpression();
+            this.vmWriter.writeArithmetic('ADD');
             // ]
-            this.output += `${this.space()}${ins.symbol()}`;
             ins.advance();
         }
         // = 
-        this.output += `${this.space()}${ins.symbol()}`;
         // expression
         ins.advance();
         this.compileExpression();
+        if (isArray) {
+            // pop temp 0     
+            // pop pointer 1    
+            // push temp 0 	   
+            // pop that 0 
+            this.vmWriter.writePop({ segment: 'TEMP', index: 0 })
+            this.vmWriter.writePop({ segment: 'POINTER', index: 1 })
+            this.vmWriter.writePush({ segment: 'TEMP', index: 0 })
+            this.vmWriter.writePop({ segment: 'THAT', index: 0 })
+        } else {
+            this.vmWriter.writePop({ segment: mapVarNameKindToCommand[varName], index })
+        }
         // ;
-        this.output += `${this.space()}${ins.symbol()}`;
-        this.indent -= 2;
-        this.output += `${this.space()}</letStatement>`;
         ins.advance();
     }
     // while语句
     compileWhile() {
-        this.output += `${this.space()}<whileStatement>`;
-        this.indent += 2;
+        const label1 = `${this.className}${this.labelIndex++}`
+        const label2 = `${this.className}${this.labelIndex++}`
         const ins = this.tokenIns;
         // while
-        this.output += `${this.space()}${ins.keyword()}`;
-        //  (
-        ins.advance();
-        this.output += `${this.space()}${ins.symbol()}`;
+        ins.advance(); //  (
         // expression
         ins.advance();
+        this.vmWriter.writeLabel(label1)
         this.compileExpression();
+        this.vmWriter.writeArithmetic('NOT')
+        this.vmWriter.writeIf(label2)
         // )
-        this.output += `${this.space()}${ins.symbol()}`;
-
         // {
         ins.advance();
-        this.output += `${this.space()}${ins.symbol()}`;
         this.compileStatements();
-        // // }
-        // this.output += `${this.space()}${ins.symbol()}`;
-        // ins.advance();
-        this.indent -= 2;
-        this.output += `${this.space()}</whileStatement>`;
+        this.vmWriter.writeGoto(label1)
+        this.vmWriter.writeLabel(label2)
     }
     // return语句
     compileReturn() {
-        this.output += `${this.space()}<returnStatement>`;
-        this.indent += 2;
         // return 
-        this.output += `${this.space()}${this.tokenIns.keyword()}`;
         this.tokenIns.advance();
         if (this.tokenIns.symbolNoMark() != ';') {
             this.compileExpression();
+        } else {
+            // void
+            this.vmWriter.writePush({ segment: 'CONST', index: 0 })
         }
+        this.vmWriter.writeReturn();
         // ;
-        this.output += `${this.space()}${this.tokenIns.symbol()}`;
         this.tokenIns.advance();
-        this.indent -= 2;
-        this.output += `${this.space()}</returnStatement>`;
     }
     // if语句，包含可选的else从句
     compileIf() {
+        const label1 = `${this.className}${this.labelIndex++}`
+        const label2 = `${this.className}${this.labelIndex++}`
         const ins = this.tokenIns;
-        this.output += `${this.space()}<ifStatement>`;
-        this.indent += 2;
         // if
-        this.output += `${this.space()}${ins.keyword()}`;
-        // (
-        ins.advance();
-        this.output += `${this.space()}${ins.symbol()}`;
+        ins.advance();  // (
         // expression
         ins.advance();
         this.compileExpression();
+        this.vmWriter.writeArithmetic('NOT')
+        this.vmWriter.writeIf(label1)
         // )
-        this.output += `${this.space()}${ins.symbol()}`;
-        // {
-        ins.advance();
-        this.output += `${this.space()}${ins.symbol()}`;
-        // statements
-        ins.advance();
+        ins.advance(); // {
+        ins.advance();// statements
         this.compileStatements();
+        this.vmWriter.writeGoto(label2)
         // (
+        this.vmWriter.writeLabel(label1)
         if (ins.keywordNoMark() == 'else') {
-            this.output += `${this.space()}${ins.keyword()}`;
-            // {
-            ins.advance();
-            this.output += `${this.space()}${ins.symbol()}`;
+            ins.advance(); // {
             ins.advance();
             this.compileStatements();
-
         }
-        this.indent -= 2;
-        this.output += `${this.space()}</ifStatement>`;
+        this.vmWriter.writeLabel(label2)
     }
     // 表达式
     compileExpression() {
         const ins = this.tokenIns;
-        this.output += `${this.space()}<expression>`;
-        this.indent += 2;
         this.compileTerm();
-        if (op.indexOf(ins.symbolNoMark()) > -1) {
-            this.output += `${this.space()}${ins.symbol()}`;
+        const ops = Object.keys(mapOp2ArithmeticCommand)
+        if (ops.indexOf(ins.symbolNoMark()) > -1) {
+            // op
             ins.advance();
             this.compileTerm();
+            switch (ins.symbolNoMark()) {
+                case '*':
+                    this.vmWriter.writeCall('Math.multiply', 2)
+                    break;
+                case '/':
+                    this.vmWriter.writeCall('Math.divide', 2)
+                    break;
+                default:
+                    this.vmWriter.writeArithmetic(mapOp2ArithmeticCommand[ins.symbolNoMark()])
+            }
         }
-        this.indent -= 2;
-        this.output += `${this.space()}</expression>`;
     }
     // term
     compileTerm() {
         const ins = this.tokenIns;
-        this.output += `${this.space()}<term>`;
-        this.indent += 2;
         let identifierName = ''
         // first 
-        // keywordConstant this
+        // keywordConstant this true false null 
         if (ins.keyword()) {
-            this.output += `${this.space()}${this.tokenIns.keyword()}`;
+            switch (ins.keywordNoMark()) {
+                case 'this':
+                    this.vmWriter.writePush({ segment: 'POINTER', index: 0 })
+                    break;
+                case 'false':
+                case 'null':
+                    this.vmWriter.writePush({ segment: 'CONST', index: 0 })
+                    break;
+                case 'true':
+                    this.vmWriter.writePush({ segment: 'CONST', index: 1 })
+                    this.vmWriter.writeArithmetic('NEG');
+                    break;
+            }
         }
         // varName
         if (ins.identifier()) {
             identifierName = this.tokenIns.identifierNoMark();
             // 此时无法判断当前的identifier是哪种
-            // this.output += `${this.space()}${this.tokenIns.identifier()}`;
         }
         // stringConstant
         if (ins.stringVal()) {
-            this.output += `${this.space()}${this.tokenIns.stringVal()}`;
+            const str: string = ins.stringValNoMark();
+            this.vmWriter.writePush({ segment: 'CONST', index: str.length })
+            this.vmWriter.writeFunction('String.new', 1)
+            for (let i of str) {
+                this.vmWriter.writePush({ segment: 'CONST', index: i.charCodeAt(0) })
+                this.vmWriter.writeCall('String.appendChar', 2)
+            }
         }
         // intConstant
         if (ins.intVal()) {
-            this.output += `${this.space()}${this.tokenIns.intVal()}`;
+            this.vmWriter.writePush({ segment: 'CONST', index: Number(ins.intValNoMark()) })
         }
         // (expression)
         if (ins.symbolNoMark() == '(') {
-            this.writeSymbol();
             ins.advance();
             this.compileExpression();
-            this.writeSymbol();
         }
         // unaryOp
         if (['-', '~'].indexOf(ins.symbolNoMark()) > -1) {
-            this.writeSymbol();
             ins.advance();
             this.compileTerm();
+            const map = {
+                '-': 'NEG',
+                '~': 'NOT'
+            }
+            this.vmWriter.writeArithmetic(map[ins.symbolNoMark()])
         } else {
             ins.advance();
         }
         // 通过判断下一个的字符，来判断之前的标识符是哪种类型的
         switch (ins.symbolNoMark()) {
             case '[':
-                // varName[expression]
-                this.output += `${this.space()}<iden-var-${this.symbolTable.IndexOf(identifierName)}> ${identifierName} </iden-var-${this.symbolTable.IndexOf(identifierName)}>`
-                this.output += `${this.space()}${this.tokenIns.symbol()}`;
+                // varName[expression] 数组
                 ins.advance();
+                // push arr base addr
+                this.vmWriter.writePush({
+                    segment: mapVarNameKindToCommand[this.symbolTable.KindOf(identifierName)],
+                    index: this.symbolTable.IndexOf(identifierName)
+                })
                 this.compileExpression();
                 // ]
-                this.output += `${this.space()}${this.tokenIns.symbol()}`;
+                this.vmWriter.writeArithmetic('ADD');
+                this.vmWriter.writePop({ segment: 'POINTER', index: 1 })
+                // push arr value
+                this.vmWriter.writePush({ segment: 'THAT', index: 0 })
                 ins.advance();
                 break;
             case '(':
-                // subRouteCall
-                this.output += `${this.space()}<iden-subroutine> ${identifierName} </iden-subroutine>`
-                this.output += `${this.space()}${this.tokenIns.symbol()}`;
+                // subRouteCall   subroutineName() is method subroutine
                 ins.advance();
-                this.compileExpressionList();
+                this.vmWriter.writePush({ segment: 'POINTER', index: 0 })
+                const paraNum = this.compileExpressionList();
+                this.vmWriter.writeCall(this.getFunctionFullName(identifierName), paraNum + 1)
                 break;
             case '.':
                 // className|varName.subroutineName(expressionList)
+                let caller = ''
+                let isClassCaller = false;
                 if (this.symbolTable.KindOf(identifierName) == 'NONE') {
-                    this.output += `${this.space()}<iden-class> ${identifierName} </iden-class>`
+                    caller = identifierName
+                    isClassCaller = true;
                 } else {
-                    this.output += `${this.space()}<iden-var-${this.symbolTable.IndexOf(identifierName)}> ${identifierName} </iden-var-${this.symbolTable.IndexOf(identifierName)}>`
+                    // varName
+                    caller = this.symbolTable.TypeOf(identifierName);
+                    // 将this作为第一个参数 因为是method
+                    const segment = mapVarNameKindToCommand[this.symbolTable.KindOf(identifierName)];
+                    this.vmWriter.writePush({ segment, index: this.symbolTable.IndexOf(identifierName) })
                 }
-                this.writeSymbol();
+                ins.advance(); // subroutineName
+                const subroutineName = ins.identifierNoMark();
+                ins.advance(); // (
                 ins.advance();
-                // this.writeIdentifier();
-                this.output += `${this.space()}${ins.identifierWithType('subroutine')}`
-                ins.advance();
-                this.writeSymbol();
-                ins.advance();
-                this.compileExpressionList();
+                const paraNum2 = this.compileExpressionList();
+                if (isClassCaller) {
+                    this.vmWriter.writeCall(`${caller}.${subroutineName}`, paraNum2)
+                } else {
+                    this.vmWriter.writeCall(`${caller}.${subroutineName}`, paraNum2 + 1)
+                }
                 break;
             default:
                 if (identifierName) {
-                    this.compileVarName(identifierName);
+                    const segment = mapVarNameKindToCommand[this.symbolTable.KindOf(identifierName)];
+                    this.vmWriter.writePush({ segment, index: this.symbolTable.IndexOf(identifierName) })
                 }
 
         }
-
-        this.indent -= 2;
-        this.output += `${this.space()}</term>`;
     }
-    // 由逗号分隔的表达式列表
-    compileExpressionList() {
+    /**
+     * 由逗号分隔的表达式，返回表达式的数量
+     */
+    compileExpressionList(): number {
         const ins = this.tokenIns;
-        this.output += `${this.space()}<expressionList>`;
-        this.indent += 2;
+        let expressionNum = 0;
         while (!(ins.symbolNoMark() == ')')) {
-            // this.compileExpression();
             if (ins.symbolNoMark() == ',') {
-                this.output += `${this.space()}${this.tokenIns.symbol()}`;
                 ins.advance();
-                // this.compileExpression();
             }
             this.compileExpression();
-
+            expressionNum++
         }
-
-        this.indent -= 2;
-        this.output += `${this.space()}</expressionList>`;
-        this.output += `${this.space()}${ins.symbol()}`;
         ins.advance();
-        // this.output += `${this.space()}${ins.symbol()}`;
-        // ins.advance();
-    }
-    space() {
-        return '\n' + Array(this.indent).fill(' ').join('');
-    }
-    writeIdentifier() {
-        this.output += `${this.space()}${this.tokenIns.identifier()}`;
-    }
-    writeSymbol() {
-        this.output += `${this.space()}${this.tokenIns.symbol()}`;
-    }
-    writeKeyword() {
-        this.output += `${this.space()}${this.tokenIns.keyword()}`;
-    }
-    writeInt() {
-        this.output += `${this.space()}${this.tokenIns.intVal()}`;
-    }
-    writeString() {
-        this.output += `${this.space()}${this.tokenIns.stringVal()}`;
+        return expressionNum;
     }
 }

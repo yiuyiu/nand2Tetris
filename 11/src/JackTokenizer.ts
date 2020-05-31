@@ -204,7 +204,7 @@ export class JackTokenizer {
     }
     stringValNoMark() {
         if (this.tokenType() == 'STRING_CONST') {
-            return this.token.replace;
+            return this.token;
         }
     }
 }

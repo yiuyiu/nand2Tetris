@@ -39,13 +39,6 @@ export class SymbolTable {
         } else {
             obj = this.subObj
         }
-        // Object.values(obj).reduce((acc,value)=>{
-        //     if(value.kind==kind){
-        //         return ++acc;
-        //     }else{
-        //         return acc;
-        //     }
-        // },0)
         let number = 0;
         for (let key in obj) {
             if (obj[key].kind == kind) {
@@ -55,7 +48,6 @@ export class SymbolTable {
         return number;
     }
     KindOf(name: string): kind | 'NONE' {
-        let kind = '';
         if (this.classObj[name] != undefined) {
             return this.classObj[name].kind
         }
